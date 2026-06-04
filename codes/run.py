@@ -19,6 +19,7 @@ from model import KGEModel
 
 from dataloader import TrainDataset
 from dataloader import BidirectionalOneShotIterator
+from reasoner import JenaMaterializedReasoner
 
 def parse_args(args=None):
     parser = argparse.ArgumentParser(
@@ -26,7 +27,8 @@ def parse_args(args=None):
         usage='train.py [<args>] [-h | --help]'
     )
 
-    parser.add_argument('--cuda', action='store_true', help='use GPU')
+    parser.add_argument('--cuda', action='store_true', help='use a CUDA GPU')
+    parser.add_argument('--mps', action='store_true', help='use the Apple Metal GPU')
     
     parser.add_argument('--do_train', action='store_true')
     parser.add_argument('--do_valid', action='store_true')
@@ -43,6 +45,30 @@ def parse_args(args=None):
     parser.add_argument('-dr', '--double_relation_embedding', action='store_true')
     
     parser.add_argument('-n', '--negative_sample_size', default=128, type=int)
+    parser.add_argument(
+        '--negative_sampling',
+        choices=['uniform', 'reasoner'],
+        default='uniform',
+        help='Strategy used to generate corrupted triples during training'
+    )
+    parser.add_argument(
+        '--reasoner_cache_path',
+        type=str,
+        default=None,
+        help='Directory with TSV files materialized by Apache Jena'
+    )
+    parser.add_argument(
+        '--negative_sample_log_path',
+        type=str,
+        default=None,
+        help='Optional TSV file where sampled corrupted triples are logged'
+    )
+    parser.add_argument(
+        '--negative_sample_log_limit',
+        type=int,
+        default=10000,
+        help='Maximum corrupted triples to write per train dataset'
+    )
     parser.add_argument('-d', '--hidden_dim', default=500, type=int)
     parser.add_argument('-g', '--gamma', default=12.0, type=float)
     parser.add_argument('-adv', '--negative_adversarial_sampling', action='store_true')
@@ -54,7 +80,10 @@ def parse_args(args=None):
                         help='Otherwise use subsampling weighting like in word2vec')
     
     parser.add_argument('-lr', '--learning_rate', default=0.0001, type=float)
-    parser.add_argument('-cpu', '--cpu_num', default=10, type=int)
+    parser.add_argument(
+        '-cpu', '--cpu_num', default=10, type=int,
+        help='Number of CPU threads; set to 0 to disable dataloader workers'
+    )
     parser.add_argument('-init', '--init_checkpoint', default=None, type=str)
     parser.add_argument('-save', '--save_path', default=None, type=str)
     parser.add_argument('--max_steps', default=100000, type=int)
@@ -159,6 +188,20 @@ def log_metrics(mode, step, metrics):
         
         
 def main(args):
+    if args.cuda and args.mps:
+        raise ValueError('Choose only one accelerator: --cuda or --mps')
+    if args.cuda and not torch.cuda.is_available():
+        raise ValueError('CUDA was requested but is not available')
+    if args.mps and not torch.backends.mps.is_available():
+        raise ValueError('MPS was requested but is not available')
+
+    if args.cuda:
+        args.device = 'cuda'
+    elif args.mps:
+        args.device = 'mps'
+    else:
+        args.device = 'cpu'
+
     if (not args.do_train) and (not args.do_valid) and (not args.do_test):
         raise ValueError('one of train/val/test mode must be choosed.')
     
@@ -169,6 +212,12 @@ def main(args):
 
     if args.do_train and args.save_path is None:
         raise ValueError('Where do you want to save your trained model?')
+
+    if args.negative_sampling == 'reasoner':
+        if args.reasoner_cache_path is None:
+            raise ValueError(
+                '--reasoner_cache_path is required with reasoner negative sampling'
+            )
     
     if args.save_path and not os.path.exists(args.save_path):
         os.makedirs(args.save_path)
@@ -205,6 +254,7 @@ def main(args):
     
     logging.info('Model: %s' % args.model)
     logging.info('Data Path: %s' % args.data_path)
+    logging.info('Device: %s' % args.device)
     logging.info('#entity: %d' % nentity)
     logging.info('#relation: %d' % nrelation)
     
@@ -217,6 +267,23 @@ def main(args):
     
     #All true triples
     all_true_triples = train_triples + valid_triples + test_triples
+
+    reasoner = None
+    if args.negative_sampling == 'reasoner':
+        reasoner = JenaMaterializedReasoner(
+            args.reasoner_cache_path, train_triples, entity2id, relation2id
+        )
+        logging.info('Reasoner axioms: %s' % reasoner.summary())
+
+    id2entity = {idx: entity for entity, idx in entity2id.items()}
+    id2relation = {idx: relation for relation, idx in relation2id.items()}
+    if args.negative_sample_log_path is not None:
+        with open(args.negative_sample_log_path, 'w') as fout:
+            fout.write(
+                'mode\tsource\tpositive_head\tpositive_relation\t'
+                'positive_tail\treplaced_entity\tnegative_entity\t'
+                'corrupted_head\tcorrupted_relation\tcorrupted_tail\n'
+            )
     
     kge_model = KGEModel(
         model_name=args.model,
@@ -232,24 +299,35 @@ def main(args):
     for name, param in kge_model.named_parameters():
         logging.info('Parameter %s: %s, require_grad = %s' % (name, str(param.size()), str(param.requires_grad)))
 
-    if args.cuda:
-        kge_model = kge_model.cuda()
+    kge_model = kge_model.to(args.device)
     
     if args.do_train:
         # Set training dataloader iterator
         train_dataloader_head = DataLoader(
-            TrainDataset(train_triples, nentity, nrelation, args.negative_sample_size, 'head-batch'), 
+            TrainDataset(
+                train_triples, nentity, nrelation, args.negative_sample_size,
+                'head-batch', args.negative_sampling, reasoner,
+                id2entity, id2relation,
+                args.negative_sample_log_path,
+                args.negative_sample_log_limit
+            ),
             batch_size=args.batch_size,
             shuffle=True, 
-            num_workers=max(1, args.cpu_num//2),
+            num_workers=max(0, args.cpu_num//2),
             collate_fn=TrainDataset.collate_fn
         )
         
         train_dataloader_tail = DataLoader(
-            TrainDataset(train_triples, nentity, nrelation, args.negative_sample_size, 'tail-batch'), 
+            TrainDataset(
+                train_triples, nentity, nrelation, args.negative_sample_size,
+                'tail-batch', args.negative_sampling, reasoner,
+                id2entity, id2relation,
+                args.negative_sample_log_path,
+                args.negative_sample_log_limit
+            ),
             batch_size=args.batch_size,
             shuffle=True, 
-            num_workers=max(1, args.cpu_num//2),
+            num_workers=max(0, args.cpu_num//2),
             collate_fn=TrainDataset.collate_fn
         )
         
@@ -269,7 +347,10 @@ def main(args):
     if args.init_checkpoint:
         # Restore model from checkpoint directory
         logging.info('Loading checkpoint %s...' % args.init_checkpoint)
-        checkpoint = torch.load(os.path.join(args.init_checkpoint, 'checkpoint'))
+        checkpoint = torch.load(
+            os.path.join(args.init_checkpoint, 'checkpoint'),
+            map_location=args.device
+        )
         init_step = checkpoint['step']
         kge_model.load_state_dict(checkpoint['model_state_dict'])
         if args.do_train:

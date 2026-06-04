@@ -10,7 +10,11 @@ import torch
 from torch.utils.data import Dataset
 
 class TrainDataset(Dataset):
-    def __init__(self, triples, nentity, nrelation, negative_sample_size, mode):
+    def __init__(
+            self, triples, nentity, nrelation, negative_sample_size, mode,
+            negative_sampling='uniform', reasoner=None,
+            id2entity=None, id2relation=None,
+            negative_sample_log_path=None, negative_sample_log_limit=0):
         self.len = len(triples)
         self.triples = triples
         self.triple_set = set(triples)
@@ -18,6 +22,13 @@ class TrainDataset(Dataset):
         self.nrelation = nrelation
         self.negative_sample_size = negative_sample_size
         self.mode = mode
+        self.negative_sampling = negative_sampling
+        self.reasoner = reasoner
+        self.id2entity = id2entity
+        self.id2relation = id2relation
+        self.negative_sample_log_path = negative_sample_log_path
+        self.negative_sample_log_limit = negative_sample_log_limit
+        self.negative_sample_log_count = 0
         self.count = self.count_frequency(triples)
         self.true_head, self.true_tail = self.get_true_head_and_tail(self.triples)
         
@@ -32,23 +43,69 @@ class TrainDataset(Dataset):
         subsampling_weight = self.count[(head, relation)] + self.count[(tail, -relation-1)]
         subsampling_weight = torch.sqrt(1 / torch.Tensor([subsampling_weight]))
         
+        if self.negative_sampling == 'reasoner':
+            negative_sample = self._reasoner_negative_sample(
+                head, relation, tail
+            )
+            if negative_sample is None:
+                negative_sample = self._uniform_negative_sample(
+                    head, relation, tail
+                )
+                negative_source = 'reasoner_fallback_uniform'
+            else:
+                negative_source = 'reasoner'
+        elif self.negative_sampling == 'uniform':
+            negative_sample = self._uniform_negative_sample(head, relation, tail)
+            negative_source = 'uniform'
+        else:
+            raise ValueError(
+                'negative sampling strategy %s not supported'
+                % self.negative_sampling
+            )
+
+        self._log_negative_samples(
+            head, relation, tail, negative_sample, negative_source
+        )
+
+        negative_sample = torch.LongTensor(negative_sample)
+
+        positive_sample = torch.LongTensor(positive_sample)
+
+        return positive_sample, negative_sample, subsampling_weight, self.mode
+
+    def _reasoner_negative_sample(self, head, relation, tail):
+        if self.reasoner is None:
+            return None
+
+        negative_sample = self.reasoner.negative_entities(
+            head, relation, tail, self.mode
+        )
+        negative_sample = self._filter_true_entities(
+            negative_sample, head, relation, tail
+        )
+        if negative_sample.size == 0:
+            return None
+
+        return np.random.choice(
+            negative_sample, size=self.negative_sample_size, replace=True
+        )
+
+    def _uniform_negative_sample(self, head, relation, tail):
         negative_sample_list = []
         negative_sample_size = 0
 
         while negative_sample_size < self.negative_sample_size:
             negative_sample = np.random.randint(self.nentity, size=self.negative_sample_size*2)
             if self.mode == 'head-batch':
-                mask = np.in1d(
-                    negative_sample, 
-                    self.true_head[(relation, tail)], 
-                    assume_unique=True, 
+                mask = np.isin(
+                    negative_sample,
+                    self.true_head[(relation, tail)],
                     invert=True
                 )
             elif self.mode == 'tail-batch':
-                mask = np.in1d(
-                    negative_sample, 
-                    self.true_tail[(head, relation)], 
-                    assume_unique=True, 
+                mask = np.isin(
+                    negative_sample,
+                    self.true_tail[(head, relation)],
                     invert=True
                 )
             else:
@@ -56,14 +113,65 @@ class TrainDataset(Dataset):
             negative_sample = negative_sample[mask]
             negative_sample_list.append(negative_sample)
             negative_sample_size += negative_sample.size
-        
-        negative_sample = np.concatenate(negative_sample_list)[:self.negative_sample_size]
 
-        negative_sample = torch.LongTensor(negative_sample)
+        return np.concatenate(negative_sample_list)[:self.negative_sample_size]
 
-        positive_sample = torch.LongTensor(positive_sample)
-            
-        return positive_sample, negative_sample, subsampling_weight, self.mode
+    def _filter_true_entities(self, entities, head, relation, tail):
+        if self.mode == 'head-batch':
+            true_entities = self.true_head[(relation, tail)]
+        elif self.mode == 'tail-batch':
+            true_entities = self.true_tail[(head, relation)]
+        else:
+            raise ValueError('Training batch mode %s not supported' % self.mode)
+
+        mask = np.isin(
+            entities,
+            true_entities,
+            invert=True
+        )
+        return entities[mask]
+
+    def _log_negative_samples(
+            self, head, relation, tail, negative_sample, negative_source):
+        if self.negative_sample_log_path is None:
+            return
+        if self.id2entity is None or self.id2relation is None:
+            return
+        if self.negative_sample_log_count >= self.negative_sample_log_limit:
+            return
+
+        rows = []
+        for negative_entity in negative_sample:
+            if self.negative_sample_log_count >= self.negative_sample_log_limit:
+                break
+            negative_entity = int(negative_entity)
+            if self.mode == 'head-batch':
+                corrupt_head = negative_entity
+                corrupt_tail = tail
+                replaced_entity = head
+            else:
+                corrupt_head = head
+                corrupt_tail = negative_entity
+                replaced_entity = tail
+
+            rows.append([
+                self.mode,
+                negative_source,
+                self.id2entity[head],
+                self.id2relation[relation],
+                self.id2entity[tail],
+                self.id2entity[replaced_entity],
+                self.id2entity[negative_entity],
+                self.id2entity[corrupt_head],
+                self.id2relation[relation],
+                self.id2entity[corrupt_tail],
+            ])
+            self.negative_sample_log_count += 1
+
+        if rows:
+            with open(self.negative_sample_log_path, 'a') as fout:
+                for row in rows:
+                    fout.write('%s\n' % '\t'.join(row))
     
     @staticmethod
     def collate_fn(data):

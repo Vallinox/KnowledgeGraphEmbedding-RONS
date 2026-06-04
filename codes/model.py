@@ -259,10 +259,9 @@ class KGEModel(nn.Module):
 
         positive_sample, negative_sample, subsampling_weight, mode = next(train_iterator)
 
-        if args.cuda:
-            positive_sample = positive_sample.cuda()
-            negative_sample = negative_sample.cuda()
-            subsampling_weight = subsampling_weight.cuda()
+        positive_sample = positive_sample.to(args.device)
+        negative_sample = negative_sample.to(args.device)
+        subsampling_weight = subsampling_weight.to(args.device)
 
         negative_score = model((positive_sample, negative_sample), mode=mode)
 
@@ -329,8 +328,7 @@ class KGEModel(nn.Module):
                     sample.append((head, relation, candidate_region))
 
             sample = torch.LongTensor(sample)
-            if args.cuda:
-                sample = sample.cuda()
+            sample = sample.to(args.device)
 
             with torch.no_grad():
                 y_score = model(sample).squeeze(1).cpu().numpy()
@@ -354,7 +352,7 @@ class KGEModel(nn.Module):
                     'head-batch'
                 ), 
                 batch_size=args.test_batch_size,
-                num_workers=max(1, args.cpu_num//2), 
+                num_workers=max(0, args.cpu_num//2),
                 collate_fn=TestDataset.collate_fn
             )
 
@@ -367,7 +365,7 @@ class KGEModel(nn.Module):
                     'tail-batch'
                 ), 
                 batch_size=args.test_batch_size,
-                num_workers=max(1, args.cpu_num//2), 
+                num_workers=max(0, args.cpu_num//2),
                 collate_fn=TestDataset.collate_fn
             )
             
@@ -381,10 +379,9 @@ class KGEModel(nn.Module):
             with torch.no_grad():
                 for test_dataset in test_dataset_list:
                     for positive_sample, negative_sample, filter_bias, mode in test_dataset:
-                        if args.cuda:
-                            positive_sample = positive_sample.cuda()
-                            negative_sample = negative_sample.cuda()
-                            filter_bias = filter_bias.cuda()
+                        positive_sample = positive_sample.to(args.device)
+                        negative_sample = negative_sample.to(args.device)
+                        filter_bias = filter_bias.to(args.device)
 
                         batch_size = positive_sample.size(0)
 
