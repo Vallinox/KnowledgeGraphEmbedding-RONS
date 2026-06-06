@@ -2,6 +2,7 @@
 
 This repository extends the original PyTorch implementation of
 [RotatE: Knowledge Graph Embedding by Relational Rotation in Complex Space](https://openreview.net/forum?id=HkgEQnRqYQ).
+
 The codebase is based on the original
 [DeepGraphLearning/KnowledgeGraphEmbedding](https://github.com/DeepGraphLearning/KnowledgeGraphEmbedding)
 repository.
