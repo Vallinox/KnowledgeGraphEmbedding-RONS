@@ -19,18 +19,18 @@ triples guided by materialized RDF/OWL constraints.
 
 Supported models:
 
-[x] RotatE
-[x] pRotatE
-[x] TransE
-[x] ComplEx
-[x] DistMult
+- [x] RotatE
+- [x] pRotatE
+- [x] TransE
+- [x] ComplEx
+- [x] DistMult
 
 Evaluation:
 
-[x] MRR, MR, HITS@1, HITS@3, HITS@10
-[x] AUC-PR for Countries datasets
+- [x] MRR, MR, HITS@1, HITS@3, HITS@10
+- [x] AUC-PR for Countries datasets
 
-Negative sampling:
+## Negative sampling:
 
 - Original uniform negative sampling, selected with `--negative_sampling uniform`
 - Optional Jena guided negative sampling, selected with `--negative_sampling reasoner`
@@ -369,21 +369,6 @@ bash run.sh train RotatE wn18 0 0 512 1024 500 12.0 0.5 0.0001 80000 8 -de
 
 The original `run.sh` uses CUDA. On macOS, use the direct `codes/run.py`
 commands with `--mps`.
-
-## Apple Silicon Notes
-
-Check MPS availability:
-
-```bash
-python - <<'PY'
-import torch
-print(torch.backends.mps.is_built())
-print(torch.backends.mps.is_available())
-PY
-```
-
-If both values are `True`, you can train with `--mps`. If MPS is unavailable,
-remove `--mps` and run on CPU.
 
 ## Implementation Notes
 
