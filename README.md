@@ -1,4 +1,4 @@
-# Knowledge Graph Embedding with Jena-Guided Negative Sampling
+# KERONS — Knowledge Graph Embedding with RDF/OWL Negative Sampling
 
 This repository extends the original PyTorch implementation of
 [RotatE: Knowledge Graph Embedding by Relational Rotation in Complex Space](https://openreview.net/forum?id=HkgEQnRqYQ).
