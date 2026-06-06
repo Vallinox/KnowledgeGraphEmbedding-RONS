@@ -2,6 +2,9 @@
 
 This repository extends the original PyTorch implementation of
 [RotatE: Knowledge Graph Embedding by Relational Rotation in Complex Space](https://openreview.net/forum?id=HkgEQnRqYQ).
+The codebase is based on the original
+[DeepGraphLearning/KnowledgeGraphEmbedding](https://github.com/DeepGraphLearning/KnowledgeGraphEmbedding)
+repository.
 
 The original training pipeline is preserved. The original uniform negative
 sampler remains available and is still the default. This fork adds an optional
@@ -15,16 +18,16 @@ triples guided by materialized RDF/OWL constraints.
 
 Supported models:
 
-- RotatE
-- pRotatE
-- TransE
-- ComplEx
-- DistMult
+[x] RotatE
+[x] pRotatE
+[x] TransE
+[x] ComplEx
+[x] DistMult
 
 Evaluation:
 
-- MRR, MR, HITS@1, HITS@3, HITS@10
-- AUC-PR for Countries datasets
+[x] MRR, MR, HITS@1, HITS@3, HITS@10
+[x] AUC-PR for Countries datasets
 
 Negative sampling:
 
@@ -44,11 +47,11 @@ Accelerators:
 Each dataset directory must contain:
 
 ```text
-entities.dict
-relations.dict
-train.txt
-valid.txt
-test.txt
+- entities.dict: a dictionary map entities to unique ids
+- relations.dict: a dictionary map relations to unique ids
+- train.txt: the KGE model is trained to fit this data set
+- valid.txt: create a blank file if no validation data is available
+- test.txt: the KGE model is evaluated on this data set
 ```
 
 The format follows the original RotatE repository:
@@ -57,12 +60,6 @@ The format follows the original RotatE repository:
 id<TAB>entity_name
 id<TAB>relation_name
 head<TAB>relation<TAB>tail
-```
-
-Countries datasets also require:
-
-```text
-regions.list
 ```
 
 The repository uses these dataset directories:
@@ -90,13 +87,6 @@ The Jena materialization step requires Java and Maven. On macOS with Homebrew:
 
 ```bash
 brew install openjdk maven
-```
-
-Verify:
-
-```bash
-java -version
-mvn -version
 ```
 
 ## Negative Sampling Modes
@@ -142,6 +132,19 @@ files, and PyTorch reads those TSV files during training.
 
 Only entities are corrupted. The relation from the positive triple is kept
 fixed for both the original sampler and the Jena guided sampler.
+
+During training the sampler tries candidates in this order:
+
+1. logical candidates from RDF/OWL constraints
+2. original uniform sampling as fallback
+
+For the Jena guided sampler, candidates are filtered against all known triples
+from `train.txt`, `valid.txt`, and `test.txt` before being used. This reduces
+known false negatives, although no method can fully rule out unknown true triples
+under the open-world assumption.
+
+Logical candidates from RDF/OWL constraints are sampled uniformly inside their
+candidate set.
 
 ### Provide or Generate `ontology.ttl`
 
@@ -396,6 +399,9 @@ The Jena guided sampler is implemented through:
 The command-line selection is handled in `codes/run.py`.
 
 ## Citation
+
+Original source code:
+[DeepGraphLearning/KnowledgeGraphEmbedding](https://github.com/DeepGraphLearning/KnowledgeGraphEmbedding).
 
 If you use the original RotatE implementation or models, cite:
 

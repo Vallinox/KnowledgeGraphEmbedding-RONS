@@ -67,7 +67,6 @@ class JenaMaterializedReasoner(object):
             os.path.join(cache_path, 'entity_types.tsv'),
             entity2id
         )
-
         self._infer_entity_types_from_schema(triples)
         self.invalid_head = self._build_invalid_entity_pools(self.relation_domain)
         self.invalid_tail = self._build_invalid_entity_pools(self.relation_range)

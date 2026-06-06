@@ -28,7 +28,7 @@ def main(args):
     mvn = shutil.which('mvn')
     if mvn is None:
         raise ValueError(
-            'Maven was not found. Install it with: brew install maven'
+            'Maven was not found. Install maven!'
         )
 
     root_path = os.path.abspath(

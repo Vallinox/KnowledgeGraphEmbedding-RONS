@@ -284,6 +284,11 @@ def main(args):
                 'positive_tail\treplaced_entity\tnegative_entity\t'
                 'corrupted_head\tcorrupted_relation\tcorrupted_tail\n'
             )
+    negative_filter_triples = (
+        all_true_triples
+        if args.negative_sampling == 'reasoner'
+        else train_triples
+    )
     
     kge_model = KGEModel(
         model_name=args.model,
@@ -309,7 +314,8 @@ def main(args):
                 'head-batch', args.negative_sampling, reasoner,
                 id2entity, id2relation,
                 args.negative_sample_log_path,
-                args.negative_sample_log_limit
+                args.negative_sample_log_limit,
+                negative_filter_triples
             ),
             batch_size=args.batch_size,
             shuffle=True, 
@@ -323,7 +329,8 @@ def main(args):
                 'tail-batch', args.negative_sampling, reasoner,
                 id2entity, id2relation,
                 args.negative_sample_log_path,
-                args.negative_sample_log_limit
+                args.negative_sample_log_limit,
+                negative_filter_triples
             ),
             batch_size=args.batch_size,
             shuffle=True, 

@@ -14,10 +14,12 @@ class TrainDataset(Dataset):
             self, triples, nentity, nrelation, negative_sample_size, mode,
             negative_sampling='uniform', reasoner=None,
             id2entity=None, id2relation=None,
-            negative_sample_log_path=None, negative_sample_log_limit=0):
+            negative_sample_log_path=None, negative_sample_log_limit=0,
+            filter_triples=None):
         self.len = len(triples)
         self.triples = triples
-        self.triple_set = set(triples)
+        self.filter_triples = triples if filter_triples is None else filter_triples
+        self.triple_set = set(self.filter_triples)
         self.nentity = nentity
         self.nrelation = nrelation
         self.negative_sample_size = negative_sample_size
@@ -30,7 +32,9 @@ class TrainDataset(Dataset):
         self.negative_sample_log_limit = negative_sample_log_limit
         self.negative_sample_log_count = 0
         self.count = self.count_frequency(triples)
-        self.true_head, self.true_tail = self.get_true_head_and_tail(self.triples)
+        self.true_head, self.true_tail = self.get_true_head_and_tail(
+            self.filter_triples
+        )
         
     def __len__(self):
         return self.len
@@ -172,19 +176,11 @@ class TrainDataset(Dataset):
             with open(self.negative_sample_log_path, 'a') as fout:
                 for row in rows:
                     fout.write('%s\n' % '\t'.join(row))
-    
-    @staticmethod
-    def collate_fn(data):
-        positive_sample = torch.stack([_[0] for _ in data], dim=0)
-        negative_sample = torch.stack([_[1] for _ in data], dim=0)
-        subsample_weight = torch.cat([_[2] for _ in data], dim=0)
-        mode = data[0][3]
-        return positive_sample, negative_sample, subsample_weight, mode
-    
+
     @staticmethod
     def count_frequency(triples, start=4):
         '''
-        Get frequency of a partial triple like (head, relation) or (relation, tail)
+        Get frequency of a partial triple like (head, relation) or (tail, -relation-1)
         The frequency will be used for subsampling like word2vec
         '''
         count = {}
@@ -199,31 +195,38 @@ class TrainDataset(Dataset):
             else:
                 count[(tail, -relation-1)] += 1
         return count
-    
+
     @staticmethod
     def get_true_head_and_tail(triples):
         '''
         Build a dictionary of true triples that will
-        be used to filter these true triples for negative sampling
+        be used to filter negative samples.
         '''
-        
         true_head = {}
         true_tail = {}
 
         for head, relation, tail in triples:
-            if (head, relation) not in true_tail:
-                true_tail[(head, relation)] = []
-            true_tail[(head, relation)].append(tail)
             if (relation, tail) not in true_head:
                 true_head[(relation, tail)] = []
             true_head[(relation, tail)].append(head)
+            if (head, relation) not in true_tail:
+                true_tail[(head, relation)] = []
+            true_tail[(head, relation)].append(tail)
 
         for relation, tail in true_head:
             true_head[(relation, tail)] = np.array(list(set(true_head[(relation, tail)])))
         for head, relation in true_tail:
-            true_tail[(head, relation)] = np.array(list(set(true_tail[(head, relation)])))                 
+            true_tail[(head, relation)] = np.array(list(set(true_tail[(head, relation)])))
 
         return true_head, true_tail
+
+    @staticmethod
+    def collate_fn(data):
+        positive_sample = torch.stack([_[0] for _ in data], dim=0)
+        negative_sample = torch.stack([_[1] for _ in data], dim=0)
+        subsample_weight = torch.cat([_[2] for _ in data], dim=0)
+        mode = data[0][3]
+        return positive_sample, negative_sample, subsample_weight, mode
 
     
 class TestDataset(Dataset):

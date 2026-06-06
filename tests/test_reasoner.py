@@ -122,7 +122,12 @@ class JenaReasonerTest(unittest.TestCase):
             cache_dir.name,
             self.triples,
             self.entity2id,
-            {'worksFor': 0, 'visits': 1, 'hasId': 2, 'knows': 3},
+            {
+                'worksFor': 0,
+                'visits': 1,
+                'hasId': 2,
+                'knows': 3,
+            },
         )
 
     def test_domain_and_inferred_range_generate_invalid_heads(self):

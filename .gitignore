@@ -5,6 +5,8 @@ checkpoint
 models/
 models/**
 logs/
+tests/
+tests/**
 logs/**
 data/*/ontology.ttl
 data/*/jena_reasoner/

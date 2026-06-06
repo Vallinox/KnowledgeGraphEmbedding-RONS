@@ -6,8 +6,10 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeSet;
 import java.net.URLEncoder;
 
@@ -58,7 +60,9 @@ public class JenaMaterializer {
         Model graph = ModelFactory.createDefaultModel();
         addLabels(graph, entities);
         addLabels(graph, relations);
-        loadTrainTriples(dataPath.resolve("train.txt"), graph, entities, relations);
+        loadTrainTriples(
+            dataPath.resolve("train.txt"), graph, entities, relations
+        );
 
         Model union = ModelFactory.createUnion(schema, graph);
         Reasoner reasoner = ReasonerRegistry.getOWLReasoner().bindSchema(schema);
@@ -215,7 +219,9 @@ public class JenaMaterializer {
                         && statement.getObject().isURIResource()) {
                     String first = statement.getSubject().getURI();
                     String second = statement.getObject().asResource().getURI();
-                    pairs.add(first + "\t" + second);
+                    if (isUserClass(first) && isUserClass(second)) {
+                        pairs.add(first + "\t" + second);
+                    }
                 }
             }
             addComplementPairs(model, pairs);
@@ -236,10 +242,11 @@ public class JenaMaterializer {
             Statement statement = statements.nextStatement();
             if (statement.getSubject().isURIResource()
                     && statement.getObject().isURIResource()) {
-                pairs.add(
-                    statement.getSubject().getURI() + "\t"
-                    + statement.getObject().asResource().getURI()
-                );
+                String first = statement.getSubject().getURI();
+                String second = statement.getObject().asResource().getURI();
+                if (isUserClass(first) && isUserClass(second)) {
+                    pairs.add(first + "\t" + second);
+                }
             }
         }
     }
@@ -263,7 +270,9 @@ public class JenaMaterializer {
                 for (String first : classUris) {
                     for (String second : classUris) {
                         if (!first.equals(second)) {
-                            pairs.add(first + "\t" + second);
+                            if (isUserClass(first) && isUserClass(second)) {
+                                pairs.add(first + "\t" + second);
+                            }
                         }
                     }
                 }
@@ -309,6 +318,13 @@ public class JenaMaterializer {
                 }
             }
         }
+    }
+
+    private static boolean isUserClass(String uri) {
+        return !uri.startsWith("http://www.w3.org/2001/XMLSchema#")
+            && !uri.startsWith("http://www.w3.org/2000/01/rdf-schema#")
+            && !uri.startsWith("http://www.w3.org/1999/02/22-rdf-syntax-ns#")
+            && !uri.startsWith("http://www.w3.org/2002/07/owl#");
     }
 
 }
